@@ -10,6 +10,7 @@ import numpy as np
 from datetime import datetime as date
 import yfinance as yf
 import binance as bi
+from train_dataset import forecastingPrice
 
 
 app = dash.Dash()
@@ -68,7 +69,7 @@ app.layout = html.Div([
                     id='date-picker-range',
                     min_date_allowed=date(2015, 1, 1),
                     max_date_allowed=date.today(),
-                    start_date=date(2020, 1, 1),
+                    start_date=date(2022, 1, 1),
                     end_date=date.today(),
                     number_of_months_shown=2,
                 )], style={"marginLeft": "8px"}),
@@ -79,12 +80,12 @@ app.layout = html.Div([
             id="actual-data-graph",
         ),
 
-        html.H2("LSTM Predicted closing price",
-                id="model-label",
-                style={"textAlign": "center"}),
+        html.H2("LTSM predicted closing price",
+                id="model-predict-label", style={"textAlign": "center"}),
         dcc.Graph(
             id="predicted-data-graph",
-        )
+        ),
+
     ])
 
 ])
@@ -100,12 +101,14 @@ def filter(item: list):
     Output("actual-data-graph", "figure"),
     [Input("graph-type-dropdown", "value"),
      Input("stock-dropdown", "value"),
+     Input("model-dropdown", "value"),
+     Input("feature-dropdown", "value"),
      Input("period-dropdown", "value"),
      Input("interval-dropdown", "value"),
      Input("date-picker-range", "start_date"),
      Input("date-picker-range", "end_date")]
 )
-def update_graph(graph_type, stock, period, interval, start_date, end_date):
+def update_graph(graph_type, stock, model, feature, period, interval, start_date, end_date):
     if stock == "BTCUSDT":
         tmp_start = int(
             round(date.fromisoformat(start_date).timestamp())) * 1000
@@ -126,32 +129,112 @@ def update_graph(graph_type, stock, period, interval, start_date, end_date):
         df['Close'] = df['Close'].astype('float64')
         df['Volume'] = df['Volume'].astype('float64')
         df["Date"] = pd.to_datetime(df["Date"], unit='ms')
-        df.index = df["Date"]
     else:
         yf_ticker_data = yf.Ticker(stock)
         df = yf_ticker_data.history(
             period=period,
             start=date.fromisoformat(start_date).strftime("%Y-%m-%d"),
             end=date.fromisoformat(end_date).strftime("%Y-%m-%d"))
+        df = pd.DataFrame(df)
+        df = df.reset_index()
 
     match graph_type:
         case "Close":
-            tmp = go.Scatter(x=df.index, y=df['Close'])
+            realistic_data_go = go.Scatter(
+                x=df["Date"], y=df['Close'], name="actual")
             title = f"{stock} closing values"
         case "Candle":
-            tmp = go.Candlestick(x=df.index,
-                                 open=df['Open'],
-                                 high=df['High'],
-                                 low=df['Low'],
-                                 close=df['Close'])
+            realistic_data_go = go.Candlestick(x=df["Date"],
+                                               open=df['Open'],
+                                               high=df['High'],
+                                               low=df['Low'],
+                                               close=df['Close'],
+                                               name="actual")
             title = f"{stock} Candlestick chart"
         case "Volume":
-            tmp = go.Scatter(x=df.index, y=df['Volume'])
+            realistic_data_go = go.Scatter(
+                x=df["Date"], y=df['Volume'], name="actual")
             title = f"{stock} volume values"
 
-    figure = {"data": [tmp],
+    figure = {"data": [realistic_data_go],
               "layout": {"title": title}}
+
     return figure
+
+
+@app.callback(
+    Output("predicted-data-graph", "figure"),
+    Output("model-predict-label", "children"),
+    [Input("graph-type-dropdown", "value"),
+     Input("stock-dropdown", "value"),
+     Input("model-dropdown", "value"),
+     Input("feature-dropdown", "value"),
+     Input("period-dropdown", "value"),
+     Input("interval-dropdown", "value"),
+     Input("date-picker-range", "start_date"),
+     Input("date-picker-range", "end_date")]
+)
+def update_graph(graph_type, stock, model, feature, period, interval, start_date, end_date):
+    if stock == "BTCUSDT":
+        tmp_start = int(
+            round(date.fromisoformat(start_date).timestamp())) * 1000
+        tmp_end = int(round(date.fromisoformat(end_date).timestamp())) * 1000
+        client = bi.Client()
+        res = client.get_klines(
+            symbol=stock,
+            interval=client.KLINE_INTERVAL_5MINUTE,
+            limit=1000,
+            startTime=tmp_start,
+            endTime=tmp_end)
+        fil = list(map(filter, res))
+        df = pd.DataFrame(
+            fil, columns=['Date', 'Open', 'High', 'Low', 'Close', 'Volume'])
+        df['Open'] = df['Open'].astype('float64')
+        df['High'] = df['High'].astype('float64')
+        df['Low'] = df['Low'].astype('float64')
+        df['Close'] = df['Close'].astype('float64')
+        df['Volume'] = df['Volume'].astype('float64')
+        df["Date"] = pd.to_datetime(df["Date"], unit='ms')
+    else:
+        yf_ticker_data = yf.Ticker(stock)
+        df = yf_ticker_data.history(
+            period=period,
+            start=date.fromisoformat(start_date).strftime("%Y-%m-%d"),
+            end=date.fromisoformat(end_date).strftime("%Y-%m-%d"))
+        df = pd.DataFrame(df)
+        df = df.reset_index()
+
+    # Forecasting
+    train_data, valid_data = forecastingPrice(
+        df=df, start_ind=60, offset=15, model=model)
+    train_data_go = go.Scatter(
+        x=train_data.index, y=train_data["Close"], fillcolor="blue", name="train")
+    predicted_data_go = go.Scatter(
+        x=valid_data.index, y=valid_data["Predictions"], fillcolor="orange", name="predicted")
+
+    label = model + " predicted closing price"
+    match graph_type:
+        case "Close":
+            realistic_data_go = go.Scatter(
+                x=df["Date"], y=df['Close'], name="actual", fillcolor="green")
+            title = f"{stock} closing values"
+        case "Candle":
+            realistic_data_go = go.Candlestick(x=df["Date"],
+                                               open=df['Open'],
+                                               high=df['High'],
+                                               low=df['Low'],
+                                               close=df['Close'],
+                                               name="actual")
+            title = f"{stock} Candlestick chart"
+        case "Volume":
+            realistic_data_go = go.Scatter(
+                x=df["Date"], y=df['Volume'], name="actual", fillcolor="green")
+            title = f"{stock} volume values"
+
+    figure = {"data": [train_data_go, predicted_data_go, realistic_data_go],
+              "layout": {"title": title}}
+
+    return figure, label
 
 
 if __name__ == '__main__':
