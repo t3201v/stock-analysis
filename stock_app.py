@@ -104,11 +104,10 @@ def filter(item: list):
      Input("model-dropdown", "value"),
      Input("feature-dropdown", "value"),
      Input("period-dropdown", "value"),
-     Input("interval-dropdown", "value"),
      Input("date-picker-range", "start_date"),
      Input("date-picker-range", "end_date")]
 )
-def update_graph(graph_type, stock, model, feature, period, interval, start_date, end_date):
+def update_graph(graph_type, stock, model, feature, period, start_date, end_date):
     if stock == "BTCUSDT":
         tmp_start = int(
             round(date.fromisoformat(start_date).timestamp())) * 1000
@@ -170,11 +169,10 @@ def update_graph(graph_type, stock, model, feature, period, interval, start_date
      Input("model-dropdown", "value"),
      Input("feature-dropdown", "value"),
      Input("period-dropdown", "value"),
-     Input("interval-dropdown", "value"),
      Input("date-picker-range", "start_date"),
      Input("date-picker-range", "end_date")]
 )
-def update_graph(graph_type, stock, model, feature, period, interval, start_date, end_date):
+def update_graph(graph_type, stock, model, feature, period, start_date, end_date):
     if stock == "BTCUSDT":
         tmp_start = int(
             round(date.fromisoformat(start_date).timestamp())) * 1000
@@ -195,6 +193,8 @@ def update_graph(graph_type, stock, model, feature, period, interval, start_date
         df['Close'] = df['Close'].astype('float64')
         df['Volume'] = df['Volume'].astype('float64')
         df["Date"] = pd.to_datetime(df["Date"], unit='ms')
+
+        freq = "5min"
     else:
         yf_ticker_data = yf.Ticker(stock)
         df = yf_ticker_data.history(
@@ -203,6 +203,8 @@ def update_graph(graph_type, stock, model, feature, period, interval, start_date
             end=date.fromisoformat(end_date).strftime("%Y-%m-%d"))
         df = pd.DataFrame(df)
         df = df.reset_index()
+
+        freq = "D"
 
     label = model + " predicted closing price"
 
@@ -218,7 +220,7 @@ def update_graph(graph_type, stock, model, feature, period, interval, start_date
 
     # Forecasting
     train_data, valid_data = forecastingPrice(
-        df=df, start_ind=60, offset=15, model=model, feature=feature)
+        df=df, n_lookback=60, n_forecast=15, model=model, feature=feature, dt_freq=freq)
     train_data_go = go.Scatter(
         x=train_data.index, y=train_data[feature], fillcolor="blue", name="train")
     predicted_data_go = go.Scatter(
