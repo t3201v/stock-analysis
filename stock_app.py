@@ -204,34 +204,35 @@ def update_graph(graph_type, stock, model, feature, period, interval, start_date
         df = pd.DataFrame(df)
         df = df.reset_index()
 
+    label = model + " predicted closing price"
+
+    # Calculate PoC
+    if feature == "PoC":
+        poc = [100 * (b - a) / a for a,
+               b in zip(df["Close"][::1], df["Close"][1::1])]
+        # the beginning is always set 0
+        poc.insert(0, 0)
+        df["PoC"] = poc
+
+        label = model + " predicted Price of Change"
+
     # Forecasting
     train_data, valid_data = forecastingPrice(
-        df=df, start_ind=60, offset=15, model=model)
+        df=df, start_ind=60, offset=15, model=model, feature=feature)
     train_data_go = go.Scatter(
-        x=train_data.index, y=train_data["Close"], fillcolor="blue", name="train")
+        x=train_data.index, y=train_data[feature], fillcolor="blue", name="train")
     predicted_data_go = go.Scatter(
         x=valid_data.index, y=valid_data["Predictions"], fillcolor="orange", name="predicted")
 
-    label = model + " predicted closing price"
     match graph_type:
         case "Close":
-            realistic_data_go = go.Scatter(
-                x=df["Date"], y=df['Close'], name="actual", fillcolor="green")
             title = f"{stock} closing values"
         case "Candle":
-            realistic_data_go = go.Candlestick(x=df["Date"],
-                                               open=df['Open'],
-                                               high=df['High'],
-                                               low=df['Low'],
-                                               close=df['Close'],
-                                               name="actual")
             title = f"{stock} Candlestick chart"
         case "Volume":
-            realistic_data_go = go.Scatter(
-                x=df["Date"], y=df['Volume'], name="actual", fillcolor="green")
             title = f"{stock} volume values"
 
-    figure = {"data": [train_data_go, predicted_data_go, realistic_data_go],
+    figure = {"data": [train_data_go, predicted_data_go],
               "layout": {"title": title}}
 
     return figure, label

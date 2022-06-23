@@ -44,17 +44,17 @@ def XGBoost_model_build(X_train, y_train):
     return model
 
 
-def forecastingPrice(df, start_ind, offset, model):
+def forecastingPrice(df, start_ind, offset, model, feature):
     length = len(df)
 
     # data = df.sort_index(ascending=True, axis=0)
     data = df
     new_dataset = pd.DataFrame(index=range(
-        0, length), columns=['Date', 'Close'])
+        0, length), columns=['Date', feature])
 
     for i in range(0, len(data)):
         new_dataset["Date"][i] = data['Date'][i]
-        new_dataset["Close"][i] = data["Close"][i]
+        new_dataset[feature][i] = data[feature][i]
 
     new_dataset.index = new_dataset.Date
     new_dataset.drop("Date", axis=1, inplace=True)
@@ -90,7 +90,7 @@ def forecastingPrice(df, start_ind, offset, model):
         case "XGBoost":
             _df = df.drop("Date", 1)
             cols = _df.columns.values
-            target = "Close"
+            target = feature
             predictors = cols[cols != target]
             X = _df[predictors].values
             y = _df[target].values
