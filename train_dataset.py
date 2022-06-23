@@ -1,3 +1,4 @@
+from tabnanny import verbose
 from time import time
 from keras.layers import LSTM, Dropout, Dense
 from keras.models import Sequential
@@ -5,7 +6,7 @@ from xgboost import XGBRegressor
 from sklearn.preprocessing import MinMaxScaler
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GridSearchCV, train_test_split
 from sklearn.preprocessing import LabelEncoder
 
 
@@ -36,18 +37,16 @@ def RNN_model_build(units, dropout, x_train, y_train, dense):
     return rnn_model
 
 
-def XGBoost_model_build(X_train, y_train):
+def XGBoost_model_build(X_train, y_train, eval_set):
     start_time = time()
-    model = XGBRegressor(max_depth=7)
-    model.fit(X_train, y_train)
+    model = XGBRegressor()
+    model.fit(X_train, y_train, eval_set=eval_set, verbose=False)
     print('Fit time : ', time() - start_time)
     return model
 
 
 def forecastingPrice(df, n_lookback, n_forecast, model, feature, dt_freq):
     length = len(df)
-
-    # data = df.sort_index(ascending=True, axis=0)
     data = df
 
     new_dataset = pd.DataFrame(index=range(
@@ -65,7 +64,6 @@ def forecastingPrice(df, n_lookback, n_forecast, model, feature, dt_freq):
     scaled_data = scaler.fit_transform(final_dataset)
 
     x_train_data, y_train_data = [], []
-
     for i in range(n_lookback, len(final_dataset) - n_forecast + 1):
         x_train_data.append(scaled_data[i-n_lookback:i, 0])
         y_train_data.append(scaled_data[i:i+n_forecast, 0])
@@ -73,7 +71,10 @@ def forecastingPrice(df, n_lookback, n_forecast, model, feature, dt_freq):
     x_train_data, y_train_data = np.array(x_train_data), np.array(y_train_data)
 
     x_train_data = np.reshape(
-        x_train_data, (x_train_data.shape[0], x_train_data.shape[1], 1))
+        x_train_data, (x_train_data.shape[0], x_train_data.shape[1]))
+
+    X_test = scaled_data[-n_lookback:]
+    X_test = np.array(X_test).reshape(1, n_lookback)
 
     match model:
         case "LTSM":
@@ -83,29 +84,30 @@ def forecastingPrice(df, n_lookback, n_forecast, model, feature, dt_freq):
             _model = RNN_model_build(
                 45, 0.2, x_train_data, y_train_data, n_forecast)
         case "XGBoost":
-            _df = df.drop("Date", 1)
-            cols = _df.columns.values
-            target = feature
-            predictors = cols[cols != target]
-            X = _df[predictors].values
-            y = _df[target].values
+            test_size = 0.1
+            test_ind = int(len(final_dataset) * (1-test_size))
 
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=n_forecast)
+            x_train, y_train = [], []
+            for i in range(n_lookback, test_ind - n_forecast + 1):
+                x_train.append(scaled_data[i-n_lookback:i, 0])
+                y_train.append(scaled_data[i:i+n_forecast, 0])
 
-            le = LabelEncoder()
-            y_train = le.fit_transform(y_train)
-            _model = XGBoost_model_build(X_train, y_train)
-            predicted_closing_price = _model.predict(X_test)
+            x_train, y_train = np.array(
+                x_train), np.array(y_train)
 
-            train_data = new_dataset[:length-n_forecast]
-            valid_data = new_dataset[length-n_forecast:]
-            valid_data['Predictions'] = predicted_closing_price
-            return train_data, valid_data
+            x_train = np.reshape(
+                x_train, (x_train.shape[0], x_train.shape[1]))
 
-    X_test = []
-    X_test = scaled_data[-n_lookback:]
-    X_test = np.array(X_test).reshape(1, n_lookback, 1)
+            x_valid, y_valid = [], []
+            for i in range(test_ind-n_forecast+1, len(final_dataset) - n_forecast + 1):
+                x_valid.append(scaled_data[i-n_lookback:i, 0])
+                y_valid.append(scaled_data[i:i+n_forecast, 0])
+
+            x_valid, y_valid = np.array(x_valid), np.array(y_valid)
+            x_valid = x_valid.reshape(x_valid.shape[0], x_valid.shape[1])
+
+            _model = XGBoost_model_build(x_train, y_train, [
+                                         (x_train, y_train), (x_valid, y_valid)])
 
     predicted_closing_price = _model.predict(X_test)
     predicted_closing_price = scaler.inverse_transform(predicted_closing_price)

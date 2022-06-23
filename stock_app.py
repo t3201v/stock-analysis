@@ -30,7 +30,7 @@ app.layout = html.Div([
                                   {'label': 'Netflix', 'value': 'NFLX'},
                                   {'label': 'Tesla', 'value': 'TSLA'}],
                          style={"width": "10rem"},
-                         value="TSLA", multi=False, clearable=False),
+                         value="NFLX", multi=False, clearable=False),
 
             dcc.Dropdown(id="graph-type-dropdown",
                          options=[{'label': 'Close Price', 'value': 'Close'},
@@ -67,6 +67,7 @@ app.layout = html.Div([
             html.Div([
                 dcc.DatePickerRange(
                     id='date-picker-range',
+                    minimum_nights=50,
                     min_date_allowed=date(2015, 1, 1),
                     max_date_allowed=date.today(),
                     start_date=date(2022, 1, 1),
@@ -219,8 +220,20 @@ def update_graph(graph_type, stock, model, feature, period, start_date, end_date
         label = model + " predicted Price of Change"
 
     # Forecasting
+    date_diff = date.fromisoformat(end_date) - date.fromisoformat(start_date)
+    date_diff = date_diff.days
+    if date_diff > 150:
+        n_lookback = 60
+        n_forecast = 15
+    else:
+        if date_diff > 100:
+            n_lookback = 30
+            n_forecast = 5
+        else:
+            n_lookback = 10
+            n_forecast = 2
     train_data, valid_data = forecastingPrice(
-        df=df, n_lookback=60, n_forecast=15, model=model, feature=feature, dt_freq=freq)
+        df=df, n_lookback=n_lookback, n_forecast=n_forecast, model=model, feature=feature, dt_freq=freq)
     train_data_go = go.Scatter(
         x=train_data.index, y=train_data[feature], fillcolor="blue", name="train")
     predicted_data_go = go.Scatter(
@@ -228,13 +241,23 @@ def update_graph(graph_type, stock, model, feature, period, start_date, end_date
 
     match graph_type:
         case "Close":
+            realistic_data_go = go.Scatter(
+                x=df["Date"], y=df['Close'], name="actual")
             title = f"{stock} closing values"
         case "Candle":
+            realistic_data_go = go.Candlestick(x=df["Date"],
+                                               open=df['Open'],
+                                               high=df['High'],
+                                               low=df['Low'],
+                                               close=df['Close'],
+                                               name="actual")
             title = f"{stock} Candlestick chart"
         case "Volume":
+            realistic_data_go = go.Scatter(
+                x=df["Date"], y=df['Volume'], name="actual")
             title = f"{stock} volume values"
 
-    figure = {"data": [train_data_go, predicted_data_go],
+    figure = {"data": [realistic_data_go, train_data_go, predicted_data_go],
               "layout": {"title": title}}
 
     return figure, label
