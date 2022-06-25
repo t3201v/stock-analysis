@@ -9,7 +9,7 @@ def filter(item: list):
     return item[0:6]
 
 
-class DataProvider:
+class ContextProvider:
     def __init__(self) -> None:
         self.df = None
         self.stock = None
@@ -95,9 +95,11 @@ class DataProvider:
                         if key2 == "v":
                             d["Volume"] = float(val2)
 
-            d["Date"] = at
-            new_row = pd.DataFrame(d, index=[0])
             # print(new_row)
             print("adding new candlestick in: -" + str(60-diff) + "s")
             if diff > 60:
+                d["Date"] = at
+                last = self.df["Close"][len(self.df) - 1]
+                d["PoC"] = 100*(d["Close"]-last)/last
+                new_row = pd.DataFrame(d, index=[0])
                 self.df = pd.concat([self.df, new_row], ignore_index=True)

@@ -1,22 +1,19 @@
 import dash
 from dash import dcc
 from dash import html
-import pandas as pd
 import plotly.graph_objs as go
 from dash.dependencies import Input, Output
 from datetime import datetime as date
-import yfinance as yf
-import binance as bi
 from binance_socket import StreamKline
-from data_provider import DataProvider
-from train_dataset import forecastingPrice
+from context_provider import ContextProvider
+from train_models import LSTM_forecast_price, RNN_forecast_price, XGBoost_forecast_price
 
 
 app = dash.Dash()
 server = app.server
 stream = StreamKline()
-dt_provider = DataProvider()
-stream.bind_cb_message(dt_provider.handle_ws_message)
+ctx = ContextProvider()
+stream.bind_cb_message(ctx.handle_ws_message)
 
 app.layout = html.Div([
 
@@ -43,7 +40,7 @@ app.layout = html.Div([
                                 "marginLeft": "4px"},
                          value="Close", multi=False, clearable=False),
 
-            dcc.Dropdown(["XGBoost", "RNN", "LTSM"],
+            dcc.Dropdown(["XGBoost", "RNN", "LSTM"],
                          id="model-dropdown",
                          style={"width": "10rem",
                                 "marginLeft": "4px"},
@@ -72,7 +69,7 @@ app.layout = html.Div([
             id="actual-data-graph",
         ),
 
-        html.H2("LTSM predicted closing price",
+        html.H2("LSTM predicted closing price",
                 id="model-predict-label", style={"textAlign": "center"}),
         dcc.Graph(
             id="predicted-data-graph",
@@ -104,7 +101,7 @@ app.layout = html.Div([
     ]
 )
 def update_graph(graph_type, stock, start_date, end_date, n):
-    df, _ = dt_provider.get_data(stock, start_date, end_date)
+    df, _ = ctx.get_data(stock, start_date, end_date)
 
     match graph_type:
         case "Close":
@@ -148,7 +145,7 @@ def update_graph(graph_type, stock, start_date, end_date, n):
     ]
 )
 def update_graph(graph_type, stock, model, feature, start_date, end_date, n):
-    df, freq = dt_provider.get_data(stock, start_date, end_date)
+    df, freq = ctx.get_data(stock, start_date, end_date)
 
     label = model + " predicted closing price"
 
@@ -169,8 +166,16 @@ def update_graph(graph_type, stock, model, feature, start_date, end_date, n):
         else:
             n_lookback = 10
             n_forecast = 2
-    _, valid_data = forecastingPrice(
-        df=df, n_lookback=n_lookback, n_forecast=n_forecast, model=model, feature=feature, dt_freq=freq)
+    match model:
+        case "LSTM":
+            _, valid_data = LSTM_forecast_price(
+                df=df, n_lookback=n_lookback, n_forecast=n_forecast, feature=feature, dt_freq=freq)
+        case "RNN":
+            _, valid_data = RNN_forecast_price(
+                df=df, n_lookback=n_lookback, n_forecast=n_forecast, feature=feature, dt_freq=freq)
+        case "XGBoost":
+            _, valid_data = XGBoost_forecast_price(
+                df=df, n_lookback=n_lookback, n_forecast=n_forecast, feature=feature, dt_freq=freq)
     # train_data_go = go.Scatter(
     #     x=train_data.index, y=train_data[feature], fillcolor="blue", name="train")
     predicted_data_go = go.Scatter(
