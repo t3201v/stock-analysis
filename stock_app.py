@@ -4,17 +4,19 @@ from dash import html
 import pandas as pd
 import plotly.graph_objs as go
 from dash.dependencies import Input, Output
-from keras.models import load_model
-from sklearn.preprocessing import MinMaxScaler
-import numpy as np
 from datetime import datetime as date
 import yfinance as yf
 import binance as bi
+from binance_socket import StreamKline
+from data_provider import DataProvider
 from train_dataset import forecastingPrice
 
 
 app = dash.Dash()
 server = app.server
+stream = StreamKline()
+dt_provider = DataProvider()
+stream.bind_cb_message(dt_provider.handle_ws_message)
 
 app.layout = html.Div([
 
@@ -35,6 +37,7 @@ app.layout = html.Div([
             dcc.Dropdown(id="graph-type-dropdown",
                          options=[{'label': 'Close Price', 'value': 'Close'},
                                   {'label': 'Candlestick', 'value': 'Candle'},
+                                  {'label': 'Price of Change', 'value': 'PoC'},
                                   {'label': 'Volume', 'value': 'Volume'}],
                          style={"width": "10rem",
                                 "marginLeft": "4px"},
@@ -44,25 +47,13 @@ app.layout = html.Div([
                          id="model-dropdown",
                          style={"width": "10rem",
                                 "marginLeft": "4px"},
-                         value="LTSM", multi=False, clearable=False),
+                         value="XGBoost", multi=False, clearable=False),
 
-            dcc.Dropdown(["Close", "PoC"],
+            dcc.Dropdown(["Close", "PoC", "Volume"],
                          id="feature-dropdown",
                          style={"width": "10rem",
                                 "marginLeft": "4px"},
                          value="Close", multi=False, clearable=False),
-
-            dcc.Dropdown(["1d", "5d", "1mo", "3mo", "6mo", "1y", "ytd"],
-                         id="period-dropdown",
-                         style={"width": "10rem",
-                                "marginLeft": "4px"},
-                         value="1d", multi=False, clearable=False),
-
-            dcc.Dropdown(["1m", "2m", "5m", "15m", "30m", "1h", "1d", "5d", "1wk"],
-                         id="interval-dropdown",
-                         style={"width": "10rem",
-                                "marginLeft": "4px"},
-                         value="5m", multi=False, clearable=False),
 
             html.Div([
                 dcc.DatePickerRange(
@@ -87,56 +78,33 @@ app.layout = html.Div([
             id="predicted-data-graph",
         ),
 
+        html.Div(id="ws"),
+        dcc.Interval(
+            id='interval-comp',
+            interval=30*1000,  # in milliseconds
+            n_intervals=0
+        ),
+
     ])
 
 ])
 
 
-def filter(item: list):
-    return item[0:6]
-
-# app callback visualizes closing values
+# app callback visualizes predicted close price
 
 
 @app.callback(
     Output("actual-data-graph", "figure"),
-    [Input("graph-type-dropdown", "value"),
-     Input("stock-dropdown", "value"),
-     Input("model-dropdown", "value"),
-     Input("feature-dropdown", "value"),
-     Input("period-dropdown", "value"),
-     Input("date-picker-range", "start_date"),
-     Input("date-picker-range", "end_date")]
+    [
+        Input("graph-type-dropdown", "value"),
+        Input("stock-dropdown", "value"),
+        Input("date-picker-range", "start_date"),
+        Input("date-picker-range", "end_date"),
+        Input("interval-comp", "n_intervals"),
+    ]
 )
-def update_graph(graph_type, stock, model, feature, period, start_date, end_date):
-    if stock == "BTCUSDT":
-        tmp_start = int(
-            round(date.fromisoformat(start_date).timestamp())) * 1000
-        tmp_end = int(round(date.fromisoformat(end_date).timestamp())) * 1000
-        client = bi.Client()
-        res = client.get_klines(
-            symbol=stock,
-            interval=client.KLINE_INTERVAL_5MINUTE,
-            limit=1000,
-            startTime=tmp_start,
-            endTime=tmp_end)
-        fil = list(map(filter, res))
-        df = pd.DataFrame(
-            fil, columns=['Date', 'Open', 'High', 'Low', 'Close', 'Volume'])
-        df['Open'] = df['Open'].astype('float64')
-        df['High'] = df['High'].astype('float64')
-        df['Low'] = df['Low'].astype('float64')
-        df['Close'] = df['Close'].astype('float64')
-        df['Volume'] = df['Volume'].astype('float64')
-        df["Date"] = pd.to_datetime(df["Date"], unit='ms')
-    else:
-        yf_ticker_data = yf.Ticker(stock)
-        df = yf_ticker_data.history(
-            period=period,
-            start=date.fromisoformat(start_date).strftime("%Y-%m-%d"),
-            end=date.fromisoformat(end_date).strftime("%Y-%m-%d"))
-        df = pd.DataFrame(df)
-        df = df.reset_index()
+def update_graph(graph_type, stock, start_date, end_date, n):
+    df, _ = dt_provider.get_data(stock, start_date, end_date)
 
     match graph_type:
         case "Close":
@@ -155,6 +123,10 @@ def update_graph(graph_type, stock, model, feature, period, start_date, end_date
             realistic_data_go = go.Scatter(
                 x=df["Date"], y=df['Volume'], name="actual")
             title = f"{stock} volume values"
+        case "PoC":
+            realistic_data_go = go.Scatter(
+                x=df["Date"], y=df['PoC'], name="actual")
+            title = f"{stock} Price of Change values"
 
     figure = {"data": [realistic_data_go],
               "layout": {"title": title}}
@@ -165,58 +137,23 @@ def update_graph(graph_type, stock, model, feature, period, start_date, end_date
 @app.callback(
     Output("predicted-data-graph", "figure"),
     Output("model-predict-label", "children"),
-    [Input("graph-type-dropdown", "value"),
-     Input("stock-dropdown", "value"),
-     Input("model-dropdown", "value"),
-     Input("feature-dropdown", "value"),
-     Input("period-dropdown", "value"),
-     Input("date-picker-range", "start_date"),
-     Input("date-picker-range", "end_date")]
+    [
+        Input("graph-type-dropdown", "value"),
+        Input("stock-dropdown", "value"),
+        Input("model-dropdown", "value"),
+        Input("feature-dropdown", "value"),
+        Input("date-picker-range", "start_date"),
+        Input("date-picker-range", "end_date"),
+        Input("interval-comp", "n_intervals"),
+    ]
 )
-def update_graph(graph_type, stock, model, feature, period, start_date, end_date):
-    if stock == "BTCUSDT":
-        tmp_start = int(
-            round(date.fromisoformat(start_date).timestamp())) * 1000
-        tmp_end = int(round(date.fromisoformat(end_date).timestamp())) * 1000
-        client = bi.Client()
-        res = client.get_klines(
-            symbol=stock,
-            interval=client.KLINE_INTERVAL_5MINUTE,
-            limit=1000,
-            startTime=tmp_start,
-            endTime=tmp_end)
-        fil = list(map(filter, res))
-        df = pd.DataFrame(
-            fil, columns=['Date', 'Open', 'High', 'Low', 'Close', 'Volume'])
-        df['Open'] = df['Open'].astype('float64')
-        df['High'] = df['High'].astype('float64')
-        df['Low'] = df['Low'].astype('float64')
-        df['Close'] = df['Close'].astype('float64')
-        df['Volume'] = df['Volume'].astype('float64')
-        df["Date"] = pd.to_datetime(df["Date"], unit='ms')
-
-        freq = "5min"
-    else:
-        yf_ticker_data = yf.Ticker(stock)
-        df = yf_ticker_data.history(
-            period=period,
-            start=date.fromisoformat(start_date).strftime("%Y-%m-%d"),
-            end=date.fromisoformat(end_date).strftime("%Y-%m-%d"))
-        df = pd.DataFrame(df)
-        df = df.reset_index()
-
-        freq = "D"
+def update_graph(graph_type, stock, model, feature, start_date, end_date, n):
+    df, freq = dt_provider.get_data(stock, start_date, end_date)
 
     label = model + " predicted closing price"
 
-    # Calculate PoC
+    # featuring PoC
     if feature == "PoC":
-        poc = [100 * (b - a) / a for a,
-               b in zip(df["Close"][::1], df["Close"][1::1])]
-        # the beginning is always set 0
-        poc.insert(0, 0)
-        df["PoC"] = poc
-
         label = model + " predicted Price of Change"
 
     # Forecasting
@@ -232,10 +169,10 @@ def update_graph(graph_type, stock, model, feature, period, start_date, end_date
         else:
             n_lookback = 10
             n_forecast = 2
-    train_data, valid_data = forecastingPrice(
+    _, valid_data = forecastingPrice(
         df=df, n_lookback=n_lookback, n_forecast=n_forecast, model=model, feature=feature, dt_freq=freq)
-    train_data_go = go.Scatter(
-        x=train_data.index, y=train_data[feature], fillcolor="blue", name="train")
+    # train_data_go = go.Scatter(
+    #     x=train_data.index, y=train_data[feature], fillcolor="blue", name="train")
     predicted_data_go = go.Scatter(
         x=valid_data.index, y=valid_data["Predictions"], fillcolor="orange", name="predicted")
 
@@ -256,11 +193,38 @@ def update_graph(graph_type, stock, model, feature, period, start_date, end_date
             realistic_data_go = go.Scatter(
                 x=df["Date"], y=df['Volume'], name="actual")
             title = f"{stock} volume values"
+        case "PoC":
+            realistic_data_go = go.Scatter(
+                x=df["Date"], y=df['PoC'], name="actual")
+            title = f"{stock} Price of Change values"
 
-    figure = {"data": [realistic_data_go, train_data_go, predicted_data_go],
+    figure = {"data": [realistic_data_go, predicted_data_go],
               "layout": {"title": title}}
 
     return figure, label
+
+
+# app callback websocket fetch new candle
+
+
+@app.callback(
+    Output("ws", "children"),
+    [
+        Input("stock-dropdown", "value"),
+    ]
+)
+def update_graph(stock):
+    if stock == "BTCUSDT":
+        # setup socket update data every interval of time
+        if (stream.isRunning()):
+            stream.stop()
+        stream.set_url(stock.lower(), "5m")
+        stream.run()
+
+    else:
+        if (stream.isRunning()):
+            stream.stop()
+    return dash.no_update
 
 
 if __name__ == '__main__':
