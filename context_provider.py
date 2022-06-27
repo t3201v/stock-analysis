@@ -36,12 +36,6 @@ class ContextProvider:
             fil = list(map(filter, res))
             self.df = pd.DataFrame(
                 fil, columns=['Date', 'Open', 'High', 'Low', 'Close', 'Volume'])
-            self.df['Open'] = self.df['Open'].astype('float64')
-            self.df['High'] = self.df['High'].astype('float64')
-            self.df['Low'] = self.df['Low'].astype('float64')
-            self.df['Close'] = self.df['Close'].astype('float64')
-            self.df['Volume'] = self.df['Volume'].astype('float64')
-            self.df["Date"] = pd.to_datetime(self.df["Date"], unit='ms')
 
             self.freq = "5min"
         else:
@@ -51,9 +45,17 @@ class ContextProvider:
                 start=date.fromisoformat(start_date).strftime("%Y-%m-%d"),
                 end=date.fromisoformat(end_date).strftime("%Y-%m-%d"))
             self.df = pd.DataFrame(self.df)
+            self.df = self.df.iloc[:, :-2]
             self.df = self.df.reset_index()
 
             self.freq = "D"
+
+        self.df['Open'] = self.df['Open'].astype('float64')
+        self.df['High'] = self.df['High'].astype('float64')
+        self.df['Low'] = self.df['Low'].astype('float64')
+        self.df['Close'] = self.df['Close'].astype('float64')
+        self.df['Volume'] = self.df['Volume'].astype('float64')
+        self.df["Date"] = pd.to_datetime(self.df["Date"], unit='ms')
 
         poc = [100 * (b - a) / a for a,
                b in zip(self.df["Close"][::1], self.df["Close"][1::1])]

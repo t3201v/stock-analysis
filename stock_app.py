@@ -6,7 +6,7 @@ from dash.dependencies import Input, Output
 from datetime import datetime as date
 from binance_socket import StreamKline
 from context_provider import ContextProvider
-from train_models import LSTM_forecast_price, RNN_forecast_price, XGBoost_forecast_price
+from load_models import LSTM_load_forecast_prices, RNN_load_forecast_prices, TATE_load_forecast_prices, XGBoost_load_forecast_prices
 
 
 app = dash.Dash()
@@ -40,13 +40,13 @@ app.layout = html.Div([
                                 "marginLeft": "4px"},
                          value="Close", multi=False, clearable=False),
 
-            dcc.Dropdown(["XGBoost", "RNN", "LSTM"],
+            dcc.Dropdown(["XGBoost", "RNN", "LSTM", "TATE"],
                          id="model-dropdown",
                          style={"width": "10rem",
                                 "marginLeft": "4px"},
                          value="XGBoost", multi=False, clearable=False),
 
-            dcc.Dropdown(["Close", "PoC", "Volume"],
+            dcc.Dropdown(["Close", "PoC"],
                          id="feature-dropdown",
                          style={"width": "10rem",
                                 "marginLeft": "4px"},
@@ -58,7 +58,7 @@ app.layout = html.Div([
                     minimum_nights=50,
                     min_date_allowed=date(2015, 1, 1),
                     max_date_allowed=date.today(),
-                    start_date=date(2022, 1, 1),
+                    start_date=date(2019, 1, 1),
                     end_date=date.today(),
                     number_of_months_shown=2,
                 )], style={"marginLeft": "8px"}),
@@ -141,10 +141,10 @@ def update_graph(graph_type, stock, start_date, end_date, n):
         Input("feature-dropdown", "value"),
         Input("date-picker-range", "start_date"),
         Input("date-picker-range", "end_date"),
-        Input("interval-comp", "n_intervals"),
+        # Input("interval-comp", "n_intervals"),
     ]
 )
-def update_graph(graph_type, stock, model, feature, start_date, end_date, n):
+def update_graph(graph_type, stock, model, feature, start_date, end_date):
     df, freq = ctx.get_data(stock, start_date, end_date)
 
     label = model + " predicted closing price"
@@ -168,14 +168,17 @@ def update_graph(graph_type, stock, model, feature, start_date, end_date, n):
             n_forecast = 2
     match model:
         case "LSTM":
-            _, valid_data = LSTM_forecast_price(
-                df=df, n_lookback=n_lookback, n_forecast=n_forecast, feature=feature, dt_freq=freq)
+            _, valid_data = LSTM_load_forecast_prices(
+                df=df, n_lookback=n_lookback, n_forecast=n_forecast, feature=feature, dt_freq=freq, stock=stock)
         case "RNN":
-            _, valid_data = RNN_forecast_price(
-                df=df, n_lookback=n_lookback, n_forecast=n_forecast, feature=feature, dt_freq=freq)
+            _, valid_data = RNN_load_forecast_prices(
+                df=df, n_lookback=n_lookback, n_forecast=n_forecast, feature=feature, dt_freq=freq, stock=stock)
         case "XGBoost":
-            _, valid_data = XGBoost_forecast_price(
-                df=df, n_lookback=n_lookback, n_forecast=n_forecast, feature=feature, dt_freq=freq)
+            _, valid_data = XGBoost_load_forecast_prices(
+                df=df, n_lookback=n_lookback, n_forecast=n_forecast, feature=feature, dt_freq=freq, stock=stock)
+        case "TATE":
+            _, valid_data = TATE_load_forecast_prices(
+                df=df, n_forecast=n_forecast,  dt_freq=freq, feature=feature, stock=stock)
     # train_data_go = go.Scatter(
     #     x=train_data.index, y=train_data[feature], fillcolor="blue", name="train")
     predicted_data_go = go.Scatter(
