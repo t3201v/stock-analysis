@@ -149,12 +149,19 @@ def XGBoost_load_forecast_prices(df, n_lookback, n_forecast, feature, dt_freq, s
 
 
 def TATE_load_forecast_prices(df, n_forecast, dt_freq, feature, stock):
+    __df = df
     cols = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
-    if feature not in cols:
-        df = df[['Date', 'Open', 'High', 'Low',
-                 'Close', 'Volume', feature]].copy()
-    else:
-        df = df[cols].copy()
+    df = df[cols].copy()
+
+    # '''Calculate percentage change'''
+
+    df['Open'] = df['Open'].pct_change()  # Create arithmetic returns column
+    df['High'] = df['High'].pct_change()  # Create arithmetic returns column
+    df['Low'] = df['Low'].pct_change()  # Create arithmetic returns column
+    df['Close'] = df['Close'].pct_change()  # Create arithmetic returns column
+    df['Volume'] = df['Volume'].pct_change()
+
+    df.dropna(how='any', axis=0, inplace=True)  # Drop all rows with NaN values
 
     ###############################################################################
     # '''Create indexes to split dataset'''
@@ -162,6 +169,29 @@ def TATE_load_forecast_prices(df, n_forecast, dt_freq, feature, stock):
     times = sorted(df.index.values)
     # Last 20% of series
     last_20pct = sorted(df.index.values)[-int(0.2*len(times))]
+
+    ###############################################################################
+    # '''Normalize price columns'''
+
+    min_return = min(df[(df.index < last_20pct)]
+                     [['Open', 'High', 'Low', 'Close']].min(axis=0))
+    max_return = max(df[(df.index < last_20pct)]
+                     [['Open', 'High', 'Low', 'Close']].max(axis=0))
+
+    # Min-max normalize price columns (0-1 range)
+    df['Open'] = (df['Open'] - min_return) / (max_return - min_return)
+    df['High'] = (df['High'] - min_return) / (max_return - min_return)
+    df['Low'] = (df['Low'] - min_return) / (max_return - min_return)
+    df['Close'] = (df['Close'] - min_return) / (max_return - min_return)
+
+    ###############################################################################
+    # '''Normalize volume column'''
+
+    min_volume = df[(df.index < last_20pct)]['Volume'].min(axis=0)
+    max_volume = df[(df.index < last_20pct)]['Volume'].max(axis=0)
+
+    # Min-max normalize volume columns (0-1 range)
+    df['Volume'] = (df['Volume'] - min_volume) / (max_volume - min_volume)
 
     ###############################################################################
     # '''Create training, validation and test split'''
@@ -183,17 +213,29 @@ def TATE_load_forecast_prices(df, n_forecast, dt_freq, feature, stock):
     X_test = X_test.reshape(1, X_test.shape[0], X_test.shape[1])
     X_test = X_test.astype(np.float32)
 
-    _model = TATE_load_model(feature, stock)
+    _model = TATE_load_model(stock)
 
     test_pred = _model.predict(X_test)
+    # print(test_pred)
+    pred = test_pred.flatten()*(max_return - min_return) + min_return
+    # print(pred)
+    pred = pd.DataFrame(pred, columns=['Predictions'])
+    pred = pred['Predictions'].add(
+        1, fill_value=0).cumprod()*__df['Close'][len(__df)-1]
+    # print(pred.values)
 
-    df_past = df[:]
+    if feature == 'PoC':
+        pred = pred.pct_change()
+        pred[0] = 0
+
+    df_past = __df[:]
     t = pd.date_range(
-        start=df['Date'][len(df)-1], periods=n_forecast, freq=dt_freq)
+        start=__df['Date'][len(__df)-1], periods=n_forecast, freq=dt_freq)
     df_future = pd.DataFrame(columns=["Date", "Predictions"])
     df_future["Date"] = t
     df_future.index = df_future["Date"]
     df_future.drop("Date", axis=1, inplace=True)
-    df_future["Predictions"] = test_pred.flatten()
+    df_future["Predictions"] = pred.values
+    # print(df_future)
 
     return df_past, df_future

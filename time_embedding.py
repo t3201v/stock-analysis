@@ -172,7 +172,7 @@ class TransformerEncoder(Layer):
         return config
 
 
-def create_model(input_shape=5, dense=1):
+def create_model(dense=1):
     # '''Initialize time and transformer layers'''
     time_embedding = Time2Vector(seq_len)
     attn_layer1 = TransformerEncoder(d_k, d_v, n_heads, ff_dim)
@@ -180,7 +180,7 @@ def create_model(input_shape=5, dense=1):
     attn_layer3 = TransformerEncoder(d_k, d_v, n_heads, ff_dim)
 
     # '''Construct model'''
-    in_seq = Input(shape=(seq_len, input_shape))
+    in_seq = Input(shape=(seq_len, 5))
     x = time_embedding(in_seq)
     x = Concatenate(axis=-1)([in_seq, x])
     x = attn_layer1((x, x, x))
@@ -197,21 +197,21 @@ def create_model(input_shape=5, dense=1):
     return model
 
 
-def TATE_train_model(X_train, y_train, X_val, y_val, n_forecast, feature, stock):
-    model = create_model(X_train.shape[2], n_forecast)
+def TATE_train_model(X_train, y_train, X_val, y_val, n_forecast, stock):
+    model = create_model(n_forecast)
     model.summary()
 
-    callback = tf.keras.callbacks.ModelCheckpoint(f'models/{stock}_{feature}_Transformer_TimeEmbedding.h5',
+    callback = tf.keras.callbacks.ModelCheckpoint(f'models/{stock}_Transformer_TimeEmbedding.h5',
                                                   monitor='val_loss',
                                                   verbose=0)
 
     model.fit(X_train, y_train,
               batch_size=batch_size,
-              epochs=10,
+              epochs=20,
               callbacks=[callback],
               validation_data=(X_val, y_val))
 
-    model = tf.keras.models.load_model(f'models/{stock}_{feature}_Transformer_TimeEmbedding.h5',
+    model = tf.keras.models.load_model(f'models/{stock}_Transformer_TimeEmbedding.h5',
                                        custom_objects={'Time2Vector': Time2Vector,
                                                        'SingleAttention': SingleAttention,
                                                        'MultiAttention': MultiAttention,
@@ -220,8 +220,8 @@ def TATE_train_model(X_train, y_train, X_val, y_val, n_forecast, feature, stock)
     return model
 
 
-def TATE_load_model(feature, stock):
-    model = tf.keras.models.load_model(f'models/{stock}_{feature}_Transformer_TimeEmbedding.h5',
+def TATE_load_model(stock):
+    model = tf.keras.models.load_model(f'models/{stock}_Transformer_TimeEmbedding.h5',
                                        custom_objects={'Time2Vector': Time2Vector,
                                                        'SingleAttention': SingleAttention,
                                                        'MultiAttention': MultiAttention,
