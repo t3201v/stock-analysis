@@ -57,11 +57,18 @@ class ContextProvider:
         self.df['Volume'] = self.df['Volume'].astype('float64')
         self.df["Date"] = pd.to_datetime(self.df["Date"], unit='ms')
 
+        # calculate poc
         poc = [100 * (b - a) / a for a,
                b in zip(self.df["Close"][::1], self.df["Close"][1::1])]
         # the beginning is always set 0
         poc.insert(0, 0)
         self.df["PoC"] = poc
+
+        # calculate moving avg of closing prices
+        min_close = self.df['Close'].min()
+        max_close = self.df['Close'].max()
+        self.df['MA'] = (self.df['Close'] - min_close) / \
+            (max_close - min_close)
 
         self.stock = stock
         self.start_date = start_date
@@ -102,6 +109,14 @@ class ContextProvider:
             if diff > 60:
                 d["Date"] = at
                 last = self.df["Close"][len(self.df) - 1]
+
                 d["PoC"] = 100*(d["Close"]-last)/last
+
                 new_row = pd.DataFrame(d, index=[0])
                 self.df = pd.concat([self.df, new_row], ignore_index=True)
+
+                # calculate moving avg of closing prices
+                min_close = self.df['Close'].min()
+                max_close = self.df['Close'].max()
+                self.df['MA'] = (self.df['Close'] - min_close) / \
+                    (max_close - min_close)

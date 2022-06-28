@@ -198,7 +198,6 @@ def XGBoost_train_forecast_prices(df, n_lookback, n_forecast, feature, dt_freq, 
 
     predicted_closing_price = _model.predict(X_test)
     predicted_closing_price = scaler.inverse_transform(predicted_closing_price)
-    print(predicted_closing_price)
 
     df_past = new_dataset[:]
     t = pd.date_range(
@@ -317,26 +316,17 @@ def TATE_train_forecast_prices(df, n_forecast, dt_freq, feature, stock):
                               y_val, n_forecast, stock)
 
     test_pred = _model.predict(X_test)
-    # print(test_pred)
-    pred = test_pred.flatten()*(max_return - min_return) + min_return
-    # print(pred)
-    pred = pd.DataFrame(pred, columns=['Predictions'])
-    pred = pred['Predictions'].add(
-        1, fill_value=0).cumprod()*__df['Close'][len(__df)-1]
-    # print(pred.values)
-
-    if feature == 'PoC':
-        pred['Predictions'] = pred['Predictions'].pct_change()
-        pred['Predictions'][0] = 0
 
     df_past = __df[:]
+    df_past.index = df_past['Date']
+    df_past.drop("Date", axis=1, inplace=True)
+
     t = pd.date_range(
         start=__df['Date'][len(__df)-1], periods=n_forecast, freq=dt_freq)
     df_future = pd.DataFrame(columns=["Date", "Predictions"])
     df_future["Date"] = t
     df_future.index = df_future["Date"]
     df_future.drop("Date", axis=1, inplace=True)
-    df_future["Predictions"] = pred.values
-    # print(df_future)
+    df_future["Predictions"] = test_pred.flatten()
 
     return df_past, df_future

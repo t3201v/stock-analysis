@@ -14,6 +14,8 @@ server = app.server
 stream = StreamKline()
 ctx = ContextProvider()
 stream.bind_cb_message(ctx.handle_ws_message)
+n_lookback = 60
+n_forecast = 15
 
 app.layout = html.Div([
 
@@ -46,11 +48,15 @@ app.layout = html.Div([
                                 "marginLeft": "4px"},
                          value="XGBoost", multi=False, clearable=False),
 
-            dcc.Dropdown(["Close", "PoC"],
-                         id="feature-dropdown",
-                         style={"width": "10rem",
+            dcc.Dropdown(options=[
+                {'label': 'Close Price', 'value': 'Close'},
+                {'label': 'Price of Change', 'value': 'PoC'},
+                {'label': 'Moving Average', 'value': 'MA'}
+            ],
+                id="feature-dropdown",
+                style={"width": "10rem",
                                 "marginLeft": "4px"},
-                         value="Close", multi=False, clearable=False),
+                value="Close", multi=False, clearable=False),
 
             html.Div([
                 dcc.DatePickerRange(
@@ -141,72 +147,49 @@ def update_graph(graph_type, stock, start_date, end_date, n):
         Input("feature-dropdown", "value"),
         Input("date-picker-range", "start_date"),
         Input("date-picker-range", "end_date"),
-        # Input("interval-comp", "n_intervals"),
+        Input("interval-comp", "n_intervals"),
     ]
 )
-def update_graph(graph_type, stock, model, feature, start_date, end_date):
+def update_graph(graph_type, stock, model, feature, start_date, end_date, n):
     df, freq = ctx.get_data(stock, start_date, end_date)
 
     label = model + " predicted closing price"
 
-    # featuring PoC
+    # prediction features
     if feature == "PoC":
         label = model + " predicted Price of Change"
+    if feature == "MA":
+        label = model + " predicted Moving Average"
 
-    # Forecasting
-    date_diff = date.fromisoformat(end_date) - date.fromisoformat(start_date)
-    date_diff = date_diff.days
-    if date_diff > 150:
-        n_lookback = 60
-        n_forecast = 15
-    else:
-        if date_diff > 100:
-            n_lookback = 30
-            n_forecast = 5
-        else:
-            n_lookback = 10
-            n_forecast = 2
     match model:
         case "LSTM":
-            _, valid_data = LSTM_load_forecast_prices(
+            train_data, valid_data = LSTM_load_forecast_prices(
                 df=df, n_lookback=n_lookback, n_forecast=n_forecast, feature=feature, dt_freq=freq, stock=stock)
         case "RNN":
-            _, valid_data = RNN_load_forecast_prices(
+            train_data, valid_data = RNN_load_forecast_prices(
                 df=df, n_lookback=n_lookback, n_forecast=n_forecast, feature=feature, dt_freq=freq, stock=stock)
         case "XGBoost":
-            _, valid_data = XGBoost_load_forecast_prices(
+            train_data, valid_data = XGBoost_load_forecast_prices(
                 df=df, n_lookback=n_lookback, n_forecast=n_forecast, feature=feature, dt_freq=freq, stock=stock)
         case "TATE":
-            _, valid_data = TATE_load_forecast_prices(
+            train_data, valid_data = TATE_load_forecast_prices(
                 df=df, n_forecast=n_forecast,  dt_freq=freq, feature=feature, stock=stock)
-    # train_data_go = go.Scatter(
-    #     x=train_data.index, y=train_data[feature], fillcolor="blue", name="train")
+    train_data_go = go.Scatter(
+        x=train_data.index, y=train_data[feature], fillcolor="blue", name="train")
     predicted_data_go = go.Scatter(
         x=valid_data.index, y=valid_data["Predictions"], fillcolor="orange", name="predicted")
 
     match graph_type:
         case "Close":
-            realistic_data_go = go.Scatter(
-                x=df["Date"], y=df['Close'], name="actual")
             title = f"{stock} closing values"
         case "Candle":
-            realistic_data_go = go.Candlestick(x=df["Date"],
-                                               open=df['Open'],
-                                               high=df['High'],
-                                               low=df['Low'],
-                                               close=df['Close'],
-                                               name="actual")
             title = f"{stock} Candlestick chart"
         case "Volume":
-            realistic_data_go = go.Scatter(
-                x=df["Date"], y=df['Volume'], name="actual")
             title = f"{stock} volume values"
         case "PoC":
-            realistic_data_go = go.Scatter(
-                x=df["Date"], y=df['PoC'], name="actual")
             title = f"{stock} Price of Change values"
 
-    figure = {"data": [realistic_data_go, predicted_data_go],
+    figure = {"data": [train_data_go, predicted_data_go],
               "layout": {"title": title}}
 
     return figure, label
