@@ -75,7 +75,7 @@ app.layout = html.Div([
             id="actual-data-graph",
         ),
 
-        html.H2("LSTM predicted closing price",
+        html.H2("XGBoost predicted closing price",
                 id="model-predict-label", style={"textAlign": "center"}),
         dcc.Graph(
             id="predicted-data-graph",
@@ -181,15 +181,27 @@ def update_graph(graph_type, stock, model, feature, start_date, end_date, n):
 
     match graph_type:
         case "Close":
+            realistic_data_go = go.Scatter(
+                x=df["Date"], y=df['Close'], name="actual")
             title = f"{stock} closing values"
         case "Candle":
+            realistic_data_go = go.Candlestick(x=df["Date"],
+                                               open=df['Open'],
+                                               high=df['High'],
+                                               low=df['Low'],
+                                               close=df['Close'],
+                                               name="actual")
             title = f"{stock} Candlestick chart"
         case "Volume":
+            realistic_data_go = go.Scatter(
+                x=df["Date"], y=df['Volume'], name="actual")
             title = f"{stock} volume values"
         case "PoC":
+            realistic_data_go = go.Scatter(
+                x=df["Date"], y=df['PoC'], name="actual")
             title = f"{stock} Price of Change values"
 
-    figure = {"data": [train_data_go, predicted_data_go],
+    figure = {"data": [realistic_data_go, train_data_go, predicted_data_go],
               "layout": {"title": title}}
 
     return figure, label
