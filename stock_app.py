@@ -42,22 +42,6 @@ app.layout = html.Div([
                                 "marginLeft": "4px"},
                          value="Close", multi=False, clearable=False),
 
-            dcc.Dropdown(["XGBoost", "RNN", "LSTM", "TATE"],
-                         id="model-dropdown",
-                         style={"width": "10rem",
-                                "marginLeft": "4px"},
-                         value="XGBoost", multi=False, clearable=False),
-
-            dcc.Dropdown(options=[
-                {'label': 'Close Price', 'value': 'Close'},
-                {'label': 'Price of Change', 'value': 'PoC'},
-                {'label': 'Moving Average', 'value': 'MA'}
-            ],
-                id="feature-dropdown",
-                style={"width": "10rem",
-                                "marginLeft": "4px"},
-                value="Close", multi=False, clearable=False),
-
             html.Div([
                 dcc.DatePickerRange(
                     id='date-picker-range',
@@ -68,14 +52,46 @@ app.layout = html.Div([
                     end_date=date.today(),
                     number_of_months_shown=2,
                 )], style={"marginLeft": "8px"}),
-        ], style={"display": "flex"}),
+        ], style={"display": "flex", "justifyContent": "center"}),
+
+        html.Div([
+            html.Div([
+                dcc.Dropdown(["XGBoost", "RNN", "LSTM", "TATE"],
+                             id="model-dropdown",
+                             style={"width": "100%", "margin": "0 auto"},
+                             value="XGBoost", multi=True, clearable=True),
+            ], style={"width": "50%"})
+        ], style={
+            "display": "flex",
+            "width": "100%",
+            "justifyContent": "center",
+            "margin": "1rem auto",
+        }),
+
+        html.Div([
+            html.Div([
+                dcc.Dropdown(options=[
+                    {'label': 'Close Price', 'value': 'Close'},
+                    {'label': 'Price of Change', 'value': 'PoC'},
+                    {'label': 'Moving Average', 'value': 'MA'}
+                ],
+                    id="feature-dropdown",
+                    style={"width": "100%", "margin": "0 auto"},
+                    value="Close", multi=True, clearable=True),
+            ], style={"width": "50%"})
+        ], style={
+            "display": "flex",
+            "width": "100%",
+            "justifyContent": "center",
+            "margin": "1rem auto",
+        }),
 
         html.H2("Actual closing price", style={"textAlign": "center"}),
         dcc.Graph(
             id="actual-data-graph",
         ),
 
-        html.H2("XGBoost predicted closing price",
+        html.H2("Stock Forecasting",
                 id="model-predict-label", style={"textAlign": "center"}),
         dcc.Graph(
             id="predicted-data-graph",
@@ -150,34 +166,16 @@ def update_graph(graph_type, stock, start_date, end_date, n):
         Input("interval-comp", "n_intervals"),
     ]
 )
-def update_graph(graph_type, stock, model, feature, start_date, end_date, n):
+def update_graph(graph_type, stock, models, features, start_date, end_date, n):
     df, freq = ctx.get_data(stock, start_date, end_date)
 
-    label = model + " predicted closing price"
+    if isinstance(models, str):
+        models = [models]
 
-    # prediction features
-    if feature == "PoC":
-        label = model + " predicted Price of Change"
-    if feature == "MA":
-        label = model + " predicted Moving Average"
+    if isinstance(features, str):
+        features = [features]
 
-    match model:
-        case "LSTM":
-            train_data, valid_data = LSTM_load_forecast_prices(
-                df=df, n_lookback=n_lookback, n_forecast=n_forecast, feature=feature, dt_freq=freq, stock=stock)
-        case "RNN":
-            train_data, valid_data = RNN_load_forecast_prices(
-                df=df, n_lookback=n_lookback, n_forecast=n_forecast, feature=feature, dt_freq=freq, stock=stock)
-        case "XGBoost":
-            train_data, valid_data = XGBoost_load_forecast_prices(
-                df=df, n_lookback=n_lookback, n_forecast=n_forecast, feature=feature, dt_freq=freq, stock=stock)
-        case "TATE":
-            train_data, valid_data = TATE_load_forecast_prices(
-                df=df, n_forecast=n_forecast,  dt_freq=freq, feature=feature, stock=stock)
-    train_data_go = go.Scatter(
-        x=train_data.index, y=train_data[feature], fillcolor="blue", name="train")
-    predicted_data_go = go.Scatter(
-        x=valid_data.index, y=valid_data["Predictions"], fillcolor="orange", name="predicted")
+    label = "Stock Forecasting"
 
     match graph_type:
         case "Close":
@@ -201,7 +199,56 @@ def update_graph(graph_type, stock, model, feature, start_date, end_date, n):
                 x=df["Date"], y=df['PoC'], name="actual")
             title = f"{stock} Price of Change values"
 
-    figure = {"data": [realistic_data_go, train_data_go, predicted_data_go],
+    data_plot = [realistic_data_go]
+
+    for feature in features:
+        for m in models:
+            match m:
+                case "LSTM":
+                    train_data, valid_data = LSTM_load_forecast_prices(
+                        df=df, n_lookback=n_lookback, n_forecast=n_forecast, feature=feature, dt_freq=freq, stock=stock)
+                    train_data_go = go.Scatter(
+                        x=train_data.index, y=train_data[feature], name=f"{m}, {feature} train")
+                    predicted_data_go = go.Scatter(
+                        x=valid_data.index, y=valid_data["Predictions"], name=f"{m}, {feature} predicted")
+
+                    data_plot.append(train_data_go)
+                    data_plot.append(predicted_data_go)
+
+                case "RNN":
+                    train_data, valid_data = RNN_load_forecast_prices(
+                        df=df, n_lookback=n_lookback, n_forecast=n_forecast, feature=feature, dt_freq=freq, stock=stock)
+                    train_data_go = go.Scatter(
+                        x=train_data.index, y=train_data[feature], name=f"{m}, {feature} train")
+                    predicted_data_go = go.Scatter(
+                        x=valid_data.index, y=valid_data["Predictions"], name=f"{m}, {feature} predicted")
+
+                    data_plot.append(train_data_go)
+                    data_plot.append(predicted_data_go)
+
+                case "XGBoost":
+                    train_data, valid_data = XGBoost_load_forecast_prices(
+                        df=df, n_lookback=n_lookback, n_forecast=n_forecast, feature=feature, dt_freq=freq, stock=stock)
+                    train_data_go = go.Scatter(
+                        x=train_data.index, y=train_data[feature], name=f"{m}, {feature} train")
+                    predicted_data_go = go.Scatter(
+                        x=valid_data.index, y=valid_data["Predictions"], name=f"{m}, {feature} predicted")
+
+                    data_plot.append(train_data_go)
+                    data_plot.append(predicted_data_go)
+
+                case "TATE":
+                    train_data, valid_data = TATE_load_forecast_prices(
+                        df=df, n_forecast=n_forecast,  dt_freq=freq, feature=feature, stock=stock)
+                    train_data_go = go.Scatter(
+                        x=train_data.index, y=train_data[feature], name=f"{m}, {feature} train")
+                    predicted_data_go = go.Scatter(
+                        x=valid_data.index, y=valid_data["Predictions"], name=f"{m}, {feature} predicted")
+
+                    data_plot.append(train_data_go)
+                    data_plot.append(predicted_data_go)
+
+    figure = {"data": data_plot,
               "layout": {"title": title}}
 
     return figure, label
